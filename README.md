@@ -1,4 +1,4 @@
-# DVS Gesture 3D-CNN (81.8% on IBM DVS128 Gesture)
+# DVS Gesture 3D-CNN (93.9% on IBM DVS128 Gesture)
 
 **Model:** `best_dvsgesture_3dcnn.pth`  
 **Accuracy:** 93.9% on the official test set  
