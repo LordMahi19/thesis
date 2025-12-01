@@ -1,0 +1,72 @@
+{
+  "model_name": "best_dvsgesture_3dcnn.pth",
+  "trained_on": "IBM DVS128 Gesture dataset (converted to .npy)",
+  "best_test_accuracy": 0.8181818181818182,
+  "required_npy_format": {
+    "file_extension": ".npy",
+    "numpy_save_mode": "np.save() → plain 2D array (not structured/recarray)",
+    "shape": "(N, 4)",
+    "dtype": "float64 or float32 (both work)",
+    "column_order_and_meaning": [
+      {
+        "index": 0,
+        "name": "x",
+        "type": "integer or float",
+        "range": [0, 127],
+        "description": "Horizontal pixel coordinate (128×128 sensor)"
+      },
+      {
+        "index": 1,
+        "name": "y",
+        "type": "integer or float",
+        "range": [0, 127],
+        "description": "Vertical pixel coordinate (128×128 sensor)"
+      },
+      {
+        "index": 2,
+        "name": "polarity",
+        "type": "integer or float",
+        "values": [0, 1],
+        "mapping": {
+          "0": "OFF event (brightness decrease)",
+          "1": "ON event (brightness increase)"
+        },
+        "critical": "Must be exactly 0 or 1 — no True/False, no -1/+1"
+      },
+      {
+        "index": 3,
+        "name": "timestamp_normalized",
+        "type": "float",
+        "range": [0.0, 1.0],
+        "description": "Timestamp normalized over the entire recording: (t - t_min) / (t_max - t_min)",
+        "note": "Original timestamps in seconds or microseconds → must be scaled to [0,1] before saving"
+      }
+    ],
+    "structured_dtype_allowed": false,
+    "dtype_names_must_be": null,
+    "example_first_5_rows": [
+      [49.0, 82.0, 0.0, 0.028],
+      [55.0, 92.0, 1.0, 0.038],
+      [55.0, 92.0, 1.0, 0.039],
+      [55.0, 92.0, 1.0, 0.039],
+      [90.0, 99.0, 0.0, 0.065]
+    ],
+    "validation_tips": [
+      "events.shape[1] must be 4",
+      "events.dtype.names must be None",
+      "np.min(events[:,2]) == 0 and np.max(events[:,2]) == 1",
+      "np.min(events[:,3]) >= 0.0 and np.max(events[:,3]) <= 1.0"
+    ],
+    "how_to_convert_from_aedat4_v2e": {
+      "tool": "aedat library (pip install aedat)",
+      "code_snippet": "with AedatFile(path) as f:\n    ev = [[e.x, e.y, 1 if e.polarity else 0, e.timestamp] for e in f['events']]\n    ev = np.array(ev)\n    ev[:,3] = (ev[:,3] - ev[:,3].min()) / (ev[:,3].max() - ev[:,3].min() + 1e-12)\n    np.save(output_npy, ev)"
+    }
+  },
+  "input_to_model_after_loading": {
+    "final_tensor_shape": "(batch, 2, 60, 128, 128)",
+    "time_bins": 60,
+    "normalization_during_inference": "divide by (max_per_sample + 1e-6) → values in [0,1]",
+    "channel_order": "channel 0 = ON events, channel 1 = OFF events"
+  },
+  "sharing_instructions": "Distribute this JSON + best_dvsgesture_3dcnn.pth + dvs_gesture_3dcnn.py → anyone can generate compatible .npy files from any source and get correct predictions."
+}
