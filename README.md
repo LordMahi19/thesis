@@ -37,10 +37,18 @@
 
 ### 1. Install dependencies
 
-```bash
-pip install torch torchvision tonic numpy
-```
+Recreate my conda environment:
 
+    ```bash
+    conda env create -f thesis_environment.yml
+    conda activate thesis
+    ```
+
+If you prefer pip:
+
+    ```bash
+    pip install -r requirements_pip.txt
+    ```
 ### 2. Run prediction
 
 The `complete_inference.py` script is set up to run prediction on a sample file.
@@ -56,8 +64,6 @@ The `complete_inference.py` script is set up to run prediction on a sample file.
 3.  **Run the script:**
 
     ```bash
-    conda env create -f thesis_environment.yml
-    conda activate thesis
     python complete_inference.py
     ```
 
