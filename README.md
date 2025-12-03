@@ -17,6 +17,10 @@
 | `newdata/`                  | Directory containing the DVS Gesture dataset.                     |
 | `README.md`                 | This file.                                                        |
 
+## DVSGesture dataset
+
+I have used the dvs128 dataset to train the model. You can download the dataset form this (https://lut-my.sharepoint.com/:f:/r/personal/mahi_talukder_student_lut_fi/Documents/Desktop/fall%202025/thesis/thesis/DVSGesture?csf=1&web=1&e=Y0dUKX)[link]
+
 ## 11 Gesture Classes (index → name)
 
 | Index | Gesture Name                 |
@@ -49,6 +53,7 @@ If you prefer pip:
     ```bash
     pip install -r requirements_pip.txt
     ```
+
 ### 2. Run prediction
 
 The `complete_inference.py` script is set up to run prediction on a sample file.
