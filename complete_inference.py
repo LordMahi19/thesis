@@ -41,7 +41,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = model.to(device)
 
 # ------------------- YOUR FILE -------------------
-npy_file = r"./newdata\DVSGesture\ibmGestureTest\user28_lab\5.npy"          # ← CHANGE THIS
+npy_file = r"converted_gesture.npy"          # ← CHANGE THIS
 
 events = np.load(npy_file)
 print(f"Loaded: {events.shape} events")
