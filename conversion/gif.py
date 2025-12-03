@@ -8,143 +8,113 @@ import tonic
 import tonic.transforms as transforms
 
 # -----------------------------
-# 1. Sensor size setup
+# 1. Sensor size
 # -----------------------------
-def ensure_3d_sensor_size(sensor_size):
-    if len(sensor_size) == 2:
-        return (sensor_size[0], sensor_size[1], 2)
-    return tuple(sensor_size)
-
-SENSOR_SIZE = ensure_3d_sensor_size(tuple(tonic.datasets.DVSGesture.sensor_size))
+SENSOR_SIZE = (128, 128, 2)   # DVS128
 H, W, C = SENSOR_SIZE
-print("Sensor size:", SENSOR_SIZE)  # should be (128, 128, 2)
 
 # -----------------------------
-# 2. Load your converted gesture
+# 2. Load your CORRECTLY converted .npy
 # -----------------------------
-data = np.load("conversion/3.npy", allow_pickle=True)
-print("Data shape:", data.shape)   # (N,4)
-print("First row:", data[0])
+data = np.load("conversion/3.npy")
+print("Data shape:", data.shape)
+print("First 5 rows:\n", data[:5])
 
 # -----------------------------
-# 2a. Normalize timestamps
+# 2. CORRECT COLUMN MAPPING FOR YOUR DATA FORMAT
 # -----------------------------
-t = data[:,0].astype(np.int64)
-t_norm = (t - t.min()) / (t.max() - t.min())   # normalize to [0,1]
-t_scaled = (t_norm * 1e6).astype(np.int64)     # rescale to microseconds
+# Your format: column 0 = x, 1 = y, 2 = p, 3 = t_normalized [0,1]
+
+x = data[:, 0].astype(np.int16)
+y = data[:, 1].astype(np.int16)
+p = data[:, 2].astype(np.int8)        # 0.0 or 1.0 → will be converted to 0/1
+t_norm = data[:, 3]
+
+# Convert normalized time [0,1] → microseconds (Tonic expects real timestamps)
+t_us = (t_norm * 1e6).astype(np.int64)   # 1e6 is standard for ~1 second gestures
+
+# Build proper structured array
+events_structured = np.zeros(len(data), dtype=[("t", "i8"), ("x", "i2"), ("y", "i2"), ("p", "i1")])
+events_structured["t"] = t_us
+events_structured["x"] = x
+events_structured["y"] = y
+events_structured["p"] = p
+
+print("Structured array created:")
+print("t range (µs):", events_structured["t"].min(), "→", events_structured["t"].max())
+print("x range:", x.min(), "→", x.max())
+print("y range:", y.min(), "→", y.max())
+print("p unique:", np.unique(p))
 
 # -----------------------------
-# 2b. Build structured array
-# -----------------------------
-dtype = np.dtype([("t", np.int64), ("x", np.int16), ("y", np.int16), ("p", np.int8)])
-event_stream = np.zeros(data.shape[0], dtype=dtype)
-event_stream["t"] = t_scaled
-event_stream["x"] = data[:,1].astype(np.int16)
-event_stream["y"] = data[:,2].astype(np.int16)
-event_stream["p"] = data[:,3].astype(np.int8)
-
-print("Structured dtype:", event_stream.dtype)
-print("First structured row:", event_stream[0])
-print("t range after normalization:", event_stream["t"].min(), event_stream["t"].max())
-
-# -----------------------------
-# 3. Frame conversion
+# 3. ToFrame transform
 # -----------------------------
 N_FRAMES = 60
-toframe = transforms.ToFrame(
-    sensor_size=SENSOR_SIZE,
-    n_time_bins=N_FRAMES
-)
+toframe = transforms.ToFrame(sensor_size=SENSOR_SIZE, n_time_bins=N_FRAMES)
 
-def events_to_frames(event_stream):
-    """
-    Convert event stream to frames of shape (T, 2, H, W).
-    """
-    frames = toframe(event_stream)
-    return frames
+frames = toframe(events_structured)  # shape: (60, 2, 128, 128)
 
 # -----------------------------
-# 4. Color overlay helper
+# 4. Color overlay (ON = blue, OFF = red)
 # -----------------------------
-def make_color_overlay(frame_2ch):
-    off = frame_2ch[0].astype(np.float32)
-    on  = frame_2ch[1].astype(np.float32)
-
-    def norm(a):
-        rng = a.max() - a.min()
-        return (a - a.min()) / (rng + 1e-6)
-
-    off_n = norm(off)
-    on_n  = norm(on)
-
-    rgb = np.zeros((frame_2ch.shape[1], frame_2ch.shape[2], 3), dtype=np.float32)
-    rgb[..., 0] = off_n  # Red
-    rgb[..., 2] = on_n   # Blue
+def make_overlay(frame_2ch):
+    off = frame_2ch[0].astype(float)
+    on  = frame_2ch[1].astype(float)
+    
+    def normalize(a):
+        mn, mx = a.min(), a.max()
+        return (a - mn) / (mx - mn + 1e-8) if mx > mn else a
+    
+    off_n = normalize(off)
+    on_n  = normalize(on)
+    
+    rgb = np.zeros((H, W, 3), dtype=float)
+    rgb[..., 0] = off_n   # Red channel  → OFF events
+    rgb[..., 2] = on_n    # Blue channel → ON events
+    rgb[..., 1] = (off_n + on_n) * 0.3  # slight green mix for visibility
     return rgb
 
 # -----------------------------
-# 5. Preview frames
+# 5. Preview static frames
 # -----------------------------
-def preview_event(event_stream, mode="overlay", num_cols=10):
-    frames = events_to_frames(event_stream)
-    T = frames.shape[0]
-    num_show = min(20, T)
-    num_rows = int(np.ceil(num_show / num_cols))
-
-    fig, axes = plt.subplots(num_rows, num_cols, figsize=(1.8*num_cols, 1.8*num_rows))
-    if num_rows == 1 and num_cols == 1:
-        axes = np.array([[axes]])
-    elif num_rows == 1:
-        axes = axes.reshape(1, -1)
-
-    for i in range(num_rows * num_cols):
-        ax = axes[i // num_cols, i % num_cols]
+def preview():
+    num_show = 20
+    cols = 10
+    rows = 2
+    fig, axes = plt.subplots(rows, cols, figsize=(12, 3))
+    axes = axes.flatten()
+    
+    for i in range(num_show):
+        ax = axes[i]
+        rgb = make_overlay(frames[i])
+        ax.imshow(rgb)
+        ax.set_title(f"Frame {i}", fontsize=8)
         ax.axis("off")
-        if i < num_show:
-            f = frames[i]
-            if mode == "overlay":
-                img = make_color_overlay(f)
-                ax.imshow(img)
-            else:
-                ax.imshow(f.sum(axis=0), cmap='gray')
-            ax.set_title(f"t={i}")
+    for j in range(num_show, len(axes)):
+        axes[j].axis("off")
     plt.tight_layout()
     plt.show()
 
 # -----------------------------
-# 6. Animate and save GIF
+# 6. Create GIF
 # -----------------------------
-def animate_event(event_stream, mode="overlay", save_gif=True, out_path="./conversion/converted_gesture.gif"):
-    frames = events_to_frames(event_stream)
-    T = frames.shape[0]
-
+def save_gif(path="conversion/converted_gesture.gif", fps=12):
     fig, ax = plt.subplots(figsize=(4, 4))
     ax.axis("off")
-    if mode == "overlay":
-        im = ax.imshow(make_color_overlay(frames[0]))
-    else:
-        im = ax.imshow(frames[0].sum(axis=0), cmap='gray')
-
+    im = ax.imshow(make_overlay(frames[0]))
+    
     def update(i):
-        if mode == "overlay":
-            im.set_data(make_color_overlay(frames[i]))
-        else:
-            im.set_data(frames[i].sum(axis=0))
+        im.set_data(make_overlay(frames[i]))
         return [im]
-
-    ani = animation.FuncAnimation(fig, update, frames=T, interval=80, blit=True)
+    
+    ani = animation.FuncAnimation(fig, update, frames=len(frames), interval=1000//fps, blit=True)
+    
+    ani.save(path, writer=PillowWriter(fps=fps))
     plt.close(fig)
-
-    if save_gif:
-        ani.save(out_path, writer=PillowWriter(fps=12))
-        print(f"Saved GIF -> {out_path}")
-    else:
-        from IPython.display import display
-        display(ani)
-    return ani
+    print(f"GIF saved → {path}")
 
 # -----------------------------
-# Run preview and animation
+# RUN
 # -----------------------------
-preview_event(event_stream, mode="overlay")
-animate_event(event_stream, mode="overlay", save_gif=True, out_path="./conversion/converted_gesture.gif")
+preview()
+save_gif("conversion/converted_gesture_corrected.gif", fps=15)

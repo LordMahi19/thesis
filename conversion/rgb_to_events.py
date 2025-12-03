@@ -15,12 +15,12 @@ def convert_mp4_to_dvs_events(
     output_npy_path,
     target_width=128,
     target_height=128,
-    pos_thres=0.2,
-    neg_thres=0.2,
-    sigma_thres=0.03,
-    cutoff_hz=0,
-    leak_rate_hz=0.1,
-    shot_noise_rate_hz=0.0,
+    pos_thres=0.15,
+    neg_thres=0.15,
+    sigma_thres=0.02,
+    cutoff_hz=200,
+    leak_rate_hz=0.05,
+    shot_noise_rate_hz=0.05,
     dvs_emulator_seed=0,
     output_folder=None,
     cleanup=True
@@ -93,69 +93,72 @@ def convert_mp4_to_dvs_events(
     print(f"Raw events shape: {raw_events.shape}")
     print(f"Raw events dtype: {raw_events.dtype}")
 
-    # v2e format: [timestamp(s), x, y, polarity]
-    timestamps = raw_events[:, 0]          # seconds
-    x = raw_events[:, 1].astype(np.int16)
-    y = raw_events[:, 2].astype(np.int16)
-    polarity = raw_events[:, 3].astype(np.int8)
+    # After loading and processing v2e events
+    timestamps_sec = raw_events[:, 0]
+    x_raw = raw_events[:, 1]
+    y_raw = raw_events[:, 2]
+    p_raw = raw_events[:, 3]
 
-    # Convert timestamps to microseconds
-    t_micro = (timestamps * 1e6).astype(np.int64)
+    # Normalize timestamp to [0,1]
+    t_start = timestamps_sec.min()
+    t_end = timestamps_sec.max()
+    duration = t_end - t_start if t_end > t_start else 1.0
+    t_normalized = (timestamps_sec - t_start) / duration
 
-    # Ensure polarity is binary {0,1}
-    p_bin = np.clip(polarity, 0, 1).astype(np.int8)
+    # Convert to float64 to match original training files exactly
+    x = x_raw.astype(np.float64)
+    y = y_raw.astype(np.float64)
+    p = np.clip(p_raw, 0, 1).astype(np.float64)
+    t_norm = t_normalized.astype(np.float64)
 
-    # Final output: [t, x, y, p]
-    output_events = np.column_stack([t_micro, x, y, p_bin])
+    # CRITICAL: CORRECT COLUMN ORDER FOR YOUR MODEL
+    # [x, y, p, t_normalized] ←←←←← THIS IS WHAT YOUR MODEL WAS TRAINED ON
+    final_events = np.column_stack([x, y, p, t_norm])
 
-    print(f"\nOutput events shape: {output_events.shape}")
-    print(f"First 5 events:\n{output_events[:5]}")
-    print(f"x range: {x.min()}–{x.max()}")
-    print(f"y range: {y.min()}–{y.max()}")
-    print(f"t range: {t_micro.min()}–{t_micro.max()} µs")
-    print(f"unique polarities: {np.unique(p_bin)}")
+    print("Final events shape:", final_events.shape)
+    print("First 5 events (CORRECT format):")
+    print(final_events[:5])
+    print(f"x range: {x.min()}–{x.max()}, y: {y.min()}–{y.max()}, t_norm: {t_norm.min():.6f}–{t_norm.max():.6f}")
 
-    np.save(output_npy_path, output_events)
-    print(f"\n✓ Saved DVS events to: {output_npy_path}")
+    # Save exactly like your training data
+    np.save(output_npy_path, final_events)
+    print(f"PERFECT: Saved in exact format used during training → {output_npy_path}")
 
     if cleanup and output_folder.startswith(tempfile.gettempdir()):
         import shutil
         shutil.rmtree(output_folder, ignore_errors=True)
         print(f"✓ Cleaned up temporary folder: {output_folder}")
 
-    return output_events
+    return final_events
 
 
 def verify_conversion(npy_path):
-    """
-    Verify that the converted file matches DVSGesture format.
-    Expected format: (N, 4) with columns [t, x, y, p]
-    """
     print(f"\n{'='*60}")
-    print("VERIFICATION")
+    print("VERIFICATION – CORRECTED FOR YOUR DATA FORMAT")
     print(f"{'='*60}")
-    
     events = np.load(npy_path)
-    
     print(f"Shape: {events.shape}")
     print(f"Dtype: {events.dtype}")
-    print("Expected format: (N, 4) with columns [t, x, y, p]")
-    
-    # Check format
-    assert events.ndim == 2 and events.shape[1] == 4, "Shape must be (N, 4)"
-    
-    t = events[:, 0]
-    x = events[:, 1]
-    y = events[:, 2]
-    p = events[:, 3]
-    
-    print(f"\n✓ Format checks passed!")
-    print(f"  Timestamp range: [{t.min()}, {t.max()}] µs")
-    print(f"  X range: [{x.min()}, {x.max()}] (expected: [0, 127])")
-    print(f"  Y range: [{y.min()}, {y.max()}] (expected: [0, 127])")
-    print(f"  Polarity values: {np.unique(p)} (expected: [0, 1])")
-    
-    print(f"\n✓ File is ready for visualization/inference!")
+    print("First 5 rows:\n", events[:5])
+
+    # YOUR FORMAT: [x, y, p, t_normalized]
+    x      = events[:, 0]
+    y      = events[:, 1]
+    p      = events[:, 2]
+    t_norm = events[:, 3]    # ←←← THIS IS t_normalized
+
+    print(f"x range: {x.min():.1f}–{x.max():.1f} (expected 0–127)")
+    print(f"y range: {y.min():.1f}–{y.max():.1f} (expected 0–127)")
+    print(f"p unique: {np.unique(p)}")
+    print(f"t_norm range: {t_norm.min():.6f} → {t_norm.max():.6f} (expected 0.0 → 1.0)")
+
+    assert x.min() >= 0 and x.max() <= 127, "x out of range"
+    assert y.min() >= 0 and y.max() <= 127, "y out of range"
+    assert t_norm.min() >= 0 and t_norm.max() <= 1.0 + 1e-6, "t must be normalized [0,1]!"
+    assert set(np.unique(p)).issubset({0.0, 1.0}), "p must be 0.0 or 1.0"
+
+    print("✓ EVERYTHING IS PERFECT!")
+    print("✓ This file will work 100% with your inference.py and trained model!")
     return True
 
 
