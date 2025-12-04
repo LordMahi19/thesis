@@ -1,13 +1,11 @@
 # predict_final_correct.py
-# GUARANTEED correct prediction on real DVS Gesture .npy files
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from tonic.transforms import ToFrame
 
-# ------------------- Model (exact same as training) -------------------
+# ------------------- Model -------------------
 class Gesture3DCNN(nn.Module):
     def __init__(self, num_classes=11):
         super().__init__()
@@ -41,34 +39,36 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = model.to(device)
 
 # ------------------- YOUR FILE -------------------
-npy_file = r"conversion/3.npy"          # ← CHANGE THIS
+npy_file = r"conversion/3.npy"  # ←←← UPDATE THIS PATH TO YOUR FILE
 
 events = np.load(npy_file)
 print(f"Loaded: {events.shape} events")
 
-# === CRITICAL FIX: only normalize timestamp to [0,1] — do NOT multiply by 6e6 ===
-if events.dtype.names is None:
-    x, y, p, t_norm = events[:,0], events[:,1], events[:,2], events[:,3]
-else:
-    x, y, p, t_norm = events['x'], events['y'], events['p'], events['t']
+# CORRECT PARSING: [x, y, p, t_norm]
+x = events[:, 0].astype(np.int16)
+y = events[:, 1].astype(np.int16)
+p = events[:, 2].astype(np.int16)
+t_norm = events[:, 3]
 
-# Build structured array with t in microseconds (but normalized!)
-# → just use the already-normalized t_norm, but give it name 't'
+# THIS IS THE ONLY LINE THAT MATTERS:
+t_us = (t_norm * 6_000_000).astype(np.int64)   # ← 6 million microseconds!
+
+# Build structured array with CORRECT timestamps
 structured = np.core.records.fromarrays(
-    [t_norm, x.astype(np.int16), y.astype(np.int16), p.astype(np.int16)],
+    [t_us, x, y, p],
     names='t,x,y,p'
 )
 
-# Convert to 60 frames
+# Now convert to frames
 frames = ToFrame(sensor_size=(128,128,2), n_time_bins=60)(structured)
-x = torch.from_numpy(frames).float().permute(1,0,2,3).unsqueeze(0)  # (1,2,60,128,128)
+x_tensor = torch.from_numpy(frames).float().permute(1,0,2,3).unsqueeze(0)  # (1,2,60,128,128)
 
-# Normalize per-sample (same as training)
-x = x / (x.amax(dim=(2,3,4), keepdim=True) + 1e-6)
+# Normalize
+x_tensor = x_tensor / (x_tensor.amax(dim=(2,3,4), keepdim=True) + 1e-6)
 
 # Predict
 with torch.no_grad():
-    logits = model(x.to(device))
+    logits = model(x_tensor.to(device))
     pred = logits.argmax(1).item()
     prob = torch.softmax(logits, 1)[0, pred].item()
 
